@@ -1,0 +1,21 @@
+# FFmpeg executables (too large for GitHub)
+ffmpeg.exe
+ffplay.exe
+ffprobe.exe
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
