@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Soundboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: white;
+            text-align: center;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        button {
+            background-color: #444;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            margin: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #666;
+        }
+        
+        .track-buttons {
+            margin: 20px 0;
+        }
+        
+        .time-display {
+            font-size: 18px;
+            margin: 20px 0;
+        }
+        
+        .progress-slider {
+            width: 80%;
+            margin: 20px 0;
+        }
+        
+        .voice-section {
+            margin: 30px 0;
+            padding: 20px;
+            background-color: #2a2a2a;
+            border-radius: 10px;
+        }
+        
+        input[type="text"] {
+            padding: 10px;
+            margin: 10px;
+            width: 300px;
+            border: none;
+            border-radius: 5px;
+            background-color: #555;
+            color: white;
+        }
+        
+        .sound-effects {
+            margin: 20px 0;
+        }
+        
+        .game-controls {
+            margin: 30px 0;
+        }
+        
+        .game-over-btn {
+            background-color: #8B0000;
+            font-weight: bold;
+        }
+        
+        .reset-btn {
+            background-color: #006400;
+        }
+        
+        .winner-btn {
+            background-color: #FFD700;
+            color: black;
+        }
+        
+        .special-btn {
+            background-color: #4B0082;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Soundboard 🎵</h1>
+        
+        <!-- Time Display -->
+        <div class="time-display" id="timeDisplay">00:00 / 00:00</div>
+        
+        <!-- Progress Slider -->
+        <input type="range" class="progress-slider" id="progressSlider" min="0" max="227" value="0">
+        
+        <!-- Track Buttons -->
+        <div class="track-buttons">
+            <h3>Music Tracks</h3>
+            <button onclick="switchTrack('Main')">Main</button>
+            <button onclick="switchTrack('Shop')">Shop</button>
+            <button onclick="switchTrack('Tarot')">Tarot</button>
+            <button onclick="switchTrack('Planet')">Planet</button>
+            <button onclick="switchTrack('Boss')">Boss</button>
+        </div>
+        
+        <!-- Voice Section -->
+        <div class="voice-section">
+            <h3>Jimbo Says</h3>
+            <input type="text" id="voiceText" placeholder="Type something to say...">
+            <br>
+            <button onclick="playVoices()">Make Jimbo Speak</button>
+        </div>
+        
+        <!-- Sound Effects -->
+        <div class="sound-effects">
+            <h3>Sound Effects</h3>
+            <button class="special-btn" onclick="playSound('polychrome')">Play Polychrome</button>
+            <button class="winner-btn" onclick="playSound('winner')">Play Winner</button>
+        </div>
+        
+        <!-- Game Controls -->
+        <div class="game-controls">
+            <button class="game-over-btn" onclick="gameOver()">GAME OVER</button>
+            <button class="reset-btn" onclick="reset()">RESET</button>
+        </div>
+        
+        <!-- Music Controls -->
+        <div>
+            <button onclick="pauseMusic()">Pause Music</button>
+            <button onclick="resumeMusic()">Resume Music</button>
+        </div>
+    </div>
+
+    <script>
+        // Audio context and players
+        let currentTrack = 'Main';
+        let musicAudio = new Audio();
+        let slowedAudio = new Audio();
+        let isGameOver = false;
+        let isPaused = false;
+        let globalStartTime = Date.now();
+        let trackDuration = 227; // 3:47 in seconds
+        
+        // Pre-load all tracks for seamless switching
+        let preloadedTracks = {};
+        
+        function preloadAllTracks() {
+            const tracks = ['main theme.mp3', 'shop theme.mp3', 'tarot pack.mp3', 'planet.mp3', 'boss.mp3'];
+            tracks.forEach(track => {
+                const audio = new Audio(`/static/audio/themes/${track}`);
+                audio.loop = true;
+                audio.volume = 0;
+                audio.preload = 'auto';
+                preloadedTracks[track] = audio;
+                
+                // Start all tracks playing but muted to keep them in sync
+                audio.play().catch(e => console.log('Preload play failed for', track));
+            });
+        }
+        
+        // Initialize music
+        function initializeMusic() {
+            preloadAllTracks();
+            
+            // Wait a moment for preloading, then set up main track
+            setTimeout(() => {
+                if (preloadedTracks['main theme.mp3']) {
+                    musicAudio = preloadedTracks['main theme.mp3'];
+                    musicAudio.volume = 1;
+                } else {
+                    // Fallback
+                    musicAudio.src = '/static/audio/themes/main theme.mp3';
+                    musicAudio.loop = true;
+                    musicAudio.play().catch(e => console.log('Autoplay prevented'));
+                }
+                updateTimeDisplay();
+            }, 500);
+        }
+        
+        // Switch tracks with synchronized timeline
+        function switchTrack(track) {
+            if (currentTrack === track) return;
+            
+            fetch('/switch_track', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({track: track})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    currentTrack = track;
+                    
+                    // Get current playback position
+                    const currentTime = musicAudio.currentTime;
+                    
+                    // Get the filename from the URL
+                    const filename = data.audio_file.split('/').pop();
+                    
+                    // Check if we have this track preloaded
+                    let newAudio;
+                    if (preloadedTracks[filename]) {
+                        newAudio = preloadedTracks[filename];
+                        newAudio.currentTime = currentTime; // Sync to same position
+                    } else {
+                        // Fallback: create new audio element
+                        newAudio = new Audio();
+                        newAudio.src = data.audio_file;
+                        newAudio.loop = true;
+                        newAudio.currentTime = currentTime;
+                    }
+                    
+                    newAudio.volume = 0;
+                    
+                    // Start playing new track at synced position
+                    newAudio.play().then(() => {
+                        // Crossfade: fade out old, fade in new
+                        crossfade(musicAudio, newAudio, () => {
+                            musicAudio = newAudio;
+                        });
+                    }).catch(e => {
+                        console.log('Audio play failed:', e);
+                        // Fallback: direct switch
+                        musicAudio.src = data.audio_file;
+                        musicAudio.currentTime = currentTime;
+                        musicAudio.play();
+                    });
+                }
+            });
+        }
+        
+        // Crossfade between two audio elements
+        function crossfade(oldAudio, newAudio, callback) {
+            const fadeDuration = 500; // 500ms crossfade
+            const steps = 20;
+            const stepTime = fadeDuration / steps;
+            const volumeStep = 1 / steps;
+            
+            let step = 0;
+            
+            const fadeInterval = setInterval(() => {
+                step++;
+                const progress = step / steps;
+                
+                oldAudio.volume = Math.max(0, 1 - progress);
+                newAudio.volume = Math.min(1, progress);
+                
+                if (step >= steps) {
+                    clearInterval(fadeInterval);
+                    oldAudio.volume = 0;
+                    newAudio.volume = 1;
+                    oldAudio.pause();
+                    if (callback) callback();
+                }
+            }, stepTime);
+        }
+        
+        // Fade functions
+        function fadeOut(audio, callback) {
+            let volume = 1;
+            const fadeStep = 0.1;
+            const interval = setInterval(() => {
+                volume -= fadeStep;
+                if (volume <= 0) {
+                    audio.volume = 0;
+                    clearInterval(interval);
+                    if (callback) callback();
+                } else {
+                    audio.volume = volume;
+                }
+            }, 50);
+        }
+        
+        function fadeIn(audio) {
+            let volume = 0;
+            audio.volume = 0;
+            const fadeStep = 0.1;
+            const interval = setInterval(() => {
+                volume += fadeStep;
+                if (volume >= 1) {
+                    audio.volume = 1;
+                    clearInterval(interval);
+                } else {
+                    audio.volume = volume;
+                }
+            }, 50);
+        }
+        
+        // Play voices
+        function playVoices() {
+            const text = document.getElementById('voiceText').value;
+            if (!text) return;
+            
+            fetch('/play_voices', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({sentence: text})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    playVoiceSequence(data.voices);
+                }
+            });
+        }
+        
+        function playVoiceSequence(voices, index = 0) {
+            if (index >= voices.length) return;
+            
+            const audio = new Audio(voices[index]);
+            
+            audio.addEventListener('loadedmetadata', () => {
+                // Make voices faster like the desktop version (1.2 to 2.0x speed)
+                const speedFactor = Math.random() * 0.8 + 1.2; // 1.2 to 2.0
+                audio.playbackRate = speedFactor;
+                audio.play();
+                
+                // Wait for this audio to finish, then play next
+                audio.addEventListener('ended', () => {
+                    playVoiceSequence(voices, index + 1);
+                });
+            });
+            
+            audio.addEventListener('error', (e) => {
+                console.log('Voice audio error:', e);
+                // Skip to next voice on error
+                playVoiceSequence(voices, index + 1);
+            });
+        }
+        
+        // Play sound effects
+        function playSound(type) {
+            fetch(`/play_sound/${type}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const audio = new Audio(data.audio_file);
+                    
+                    if (type === 'winner') {
+                        // Duck music volume
+                        musicAudio.volume = 0.66;
+                        audio.onended = () => {
+                            musicAudio.volume = 1.0;
+                        };
+                    }
+                    
+                    audio.play();
+                }
+            });
+        }
+        
+        // Game Over with enhanced defeat effects
+        function gameOver() {
+            switchTrack('Boss');
+            isGameOver = true;
+            
+            setTimeout(() => {
+                // Create Web Audio context for advanced effects
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create audio source
+                slowedAudio.src = '/static/audio/themes/boss.mp3';
+                slowedAudio.loop = true;
+                slowedAudio.playbackRate = 0.7; // Slightly less slow than before
+                slowedAudio.volume = 0;
+                
+                // Create audio nodes for effects
+                const source = audioContext.createMediaElementSource(slowedAudio);
+                const lowPassFilter = audioContext.createBiquadFilter();
+                const delayNode = audioContext.createDelay();
+                const delayGain = audioContext.createGain();
+                
+                // Configure low-pass filter (muffled/underwater effect)
+                lowPassFilter.type = 'lowpass';
+                lowPassFilter.frequency.value = 800; // Cut off high frequencies
+                lowPassFilter.Q.value = 2;
+                
+                // Configure delay for echo/reverb effect
+                delayNode.delayTime.value = 0.3;
+                delayGain.gain.value = 0.3;
+                
+                // Connect audio graph (no main gain node to avoid conflicts)
+                source.connect(lowPassFilter);
+                lowPassFilter.connect(audioContext.destination);
+                
+                // Add echo/reverb
+                lowPassFilter.connect(delayNode);
+                delayNode.connect(delayGain);
+                delayGain.connect(lowPassFilter);
+                
+                slowedAudio.play();
+                
+                // Crossfade with dramatic effects using regular volume
+                let step = 0;
+                const steps = 100;
+                const interval = setInterval(() => {
+                    const normalVol = 1 - (step / steps);
+                    const slowVol = step / steps;
+                    
+                    musicAudio.volume = normalVol;
+                    slowedAudio.volume = slowVol; // Use regular volume instead of Web Audio gain
+                    
+                    // Progressive filter cutoff (gets more muffled over time)
+                    lowPassFilter.frequency.value = 800 - (step * 4); // 800Hz down to 400Hz
+                    
+                    // Add subtle pitch bend down
+                    slowedAudio.playbackRate = 0.7 - (step * 0.001); // Very slight pitch drop
+                    
+                    step++;
+                    if (step >= steps) {
+                        clearInterval(interval);
+                        musicAudio.volume = 0;
+                        slowedAudio.volume = 1; // Keep at full volume with effects!
+                    }
+                }, 50);
+            }, 0);
+        }
+        
+        // Reset
+        function reset() {
+            isGameOver = false;
+            slowedAudio.pause();
+            slowedAudio.currentTime = 0;
+            slowedAudio.playbackRate = 1.0; // Reset playback rate
+            musicAudio.volume = 1;
+            switchTrack('Main'); // Reset to main theme
+        }
+        
+        // Music controls
+        function pauseMusic() {
+            isPaused = true;
+            musicAudio.pause();
+            slowedAudio.pause();
+        }
+        
+        function resumeMusic() {
+            isPaused = false;
+            musicAudio.play();
+            if (isGameOver) slowedAudio.play();
+        }
+        
+        // Time display
+        function updateTimeDisplay() {
+            setInterval(() => {
+                if (!isPaused) {
+                    const elapsed = ((Date.now() - globalStartTime) / 1000) % trackDuration;
+                    const minutes = Math.floor(elapsed / 60);
+                    const seconds = Math.floor(elapsed % 60);
+                    const totalMin = Math.floor(trackDuration / 60);
+                    const totalSec = Math.floor(trackDuration % 60);
+                    
+                    document.getElementById('timeDisplay').textContent = 
+                        `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')} / ${totalMin.toString().padStart(2, '0')}:${totalSec.toString().padStart(2, '0')}`;
+                    
+                    document.getElementById('progressSlider').value = elapsed;
+                }
+            }, 100);
+        }
+        
+        // Initialize when page loads
+        window.addEventListener('load', () => {
+            // Wait for user interaction before playing audio
+            document.addEventListener('click', initializeMusic, {once: true});
+        });
+    </script>
+</body>
+</html>
